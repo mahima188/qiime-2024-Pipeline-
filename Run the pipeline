@@ -1,0 +1,2 @@
+chmod +x qiime2_pipeline.sh
+./qiime2_pipeline.sh
