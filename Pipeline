@@ -1,0 +1,321 @@
+#Complete QIIME2 Automated Pipeline
+
+Automated QIIME2 workflow for:
+
+- OTU clustering
+- Taxonomy assignment
+- ANCOM differential abundance
+- Bray-Curtis beta diversity
+- Taxa visualization
+
+---
+
+#Input Structure
+
+## Input Folder
+```bash
+/path/to/combined_analysis
+```
+
+## Metadata File
+```bash
+/path/to/metadata_combined.tsv
+```
+
+## Output Folder
+```bash
+/path/to/results
+```
+
+---
+
+#Pipeline Script
+
+```bash
+#!/bin/bash
+
+#############################################
+# COMPLETE QIIME2 AUTOMATED PIPELINE
+# OTU + TAXONOMY + ANCOM + BETA DIVERSITY
+#############################################
+
+# Stop immediately if any command fails
+set -e
+
+#############################################
+# DEFINE PATHS
+#############################################
+
+INPUT_DIR="/path/to/combined_analysis"
+METADATA="/path/to/metadata_combined.tsv"
+OUTPUT_DIR="/path/to/results"
+
+SILVA_SEQS="/path/to/silva-138-99-seqs.qza"
+SILVA_TAX="/path/to/silva-138-99-tax.qza"
+
+mkdir -p ${OUTPUT_DIR}
+
+#############################################
+# STEP 1 — IMPORT METADATA
+#############################################
+
+echo "========================================="
+echo "STEP 1: Metadata Visualization"
+echo "========================================="
+
+qiime metadata tabulate \
+--m-input-file ${METADATA} \
+--o-visualization ${OUTPUT_DIR}/metadata.qzv
+
+
+#############################################
+# STEP 2 — IMPORT FASTQ FILES
+#############################################
+
+echo "========================================="
+echo "STEP 2: Importing Sequence Files"
+echo "========================================="
+
+qiime tools import \
+--type 'SampleData[PairedEndSequencesWithQuality]' \
+--input-path ${INPUT_DIR} \
+--input-format CasavaOneEightSingleLanePerSampleDirFmt \
+--output-path ${OUTPUT_DIR}/demux-paired-end.qza
+
+
+#############################################
+# STEP 3 — DEMUX SUMMARY
+#############################################
+
+echo "========================================="
+echo "STEP 3: Demultiplex Summary"
+echo "========================================="
+
+qiime demux summarize \
+--i-data ${OUTPUT_DIR}/demux-paired-end.qza \
+--o-visualization ${OUTPUT_DIR}/demux-summary.qzv
+
+
+#############################################
+# STEP 4 — QUALITY FILTERING
+#############################################
+
+echo "========================================="
+echo "STEP 4: Quality Filtering"
+echo "========================================="
+
+qiime quality-filter q-score \
+--i-demux ${OUTPUT_DIR}/demux-paired-end.qza \
+--o-filtered-sequences ${OUTPUT_DIR}/filtered-seqs.qza \
+--o-filter-stats ${OUTPUT_DIR}/filter-stats.qza
+
+
+#############################################
+# STEP 5 — DEREPLICATION
+#############################################
+
+echo "========================================="
+echo "STEP 5: Dereplicating Sequences"
+echo "========================================="
+
+qiime vsearch dereplicate-sequences \
+--i-sequences ${OUTPUT_DIR}/filtered-seqs.qza \
+--o-dereplicated-table ${OUTPUT_DIR}/derep-table.qza \
+--o-dereplicated-sequences ${OUTPUT_DIR}/derep-seqs.qza
+
+
+#############################################
+# STEP 6 — OTU CLUSTERING
+#############################################
+
+echo "========================================="
+echo "STEP 6: OTU Clustering (97%)"
+echo "========================================="
+
+qiime vsearch cluster-features-de-novo \
+--i-table ${OUTPUT_DIR}/derep-table.qza \
+--i-sequences ${OUTPUT_DIR}/derep-seqs.qza \
+--p-perc-identity 0.97 \
+--o-clustered-table ${OUTPUT_DIR}/otu-table.qza \
+--o-clustered-sequences ${OUTPUT_DIR}/otu-seqs.qza
+
+
+#############################################
+# STEP 7 — OTU SEQUENCE VISUALIZATION
+#############################################
+
+echo "========================================="
+echo "STEP 7: OTU Sequence Visualization"
+echo "========================================="
+
+qiime feature-table tabulate-seqs \
+--i-data ${OUTPUT_DIR}/otu-seqs.qza \
+--o-visualization ${OUTPUT_DIR}/otu-seqs.qzv
+
+
+#############################################
+# STEP 8 — OTU TABLE SUMMARY
+#############################################
+
+echo "========================================="
+echo "STEP 8: OTU Table Summary"
+echo "========================================="
+
+qiime feature-table summarize \
+--i-table ${OUTPUT_DIR}/otu-table.qza \
+--o-visualization ${OUTPUT_DIR}/otu-table.qzv \
+--m-sample-metadata-file ${METADATA}
+
+
+#############################################
+# STEP 9 — TAXONOMY ASSIGNMENT
+#############################################
+
+echo "========================================="
+echo "STEP 9: Taxonomy Assignment"
+echo "========================================="
+
+qiime feature-classifier classify-consensus-blast \
+--i-query ${OUTPUT_DIR}/otu-seqs.qza \
+--i-reference-reads ${SILVA_SEQS} \
+--i-reference-taxonomy ${SILVA_TAX} \
+--o-classification ${OUTPUT_DIR}/taxonomy.qza \
+--o-search-results ${OUTPUT_DIR}/blast_hits.qza
+
+
+#############################################
+# STEP 10 — TAXONOMY VISUALIZATION
+#############################################
+
+echo "========================================="
+echo "STEP 10: Taxonomy Visualization"
+echo "========================================="
+
+qiime metadata tabulate \
+--m-input-file ${OUTPUT_DIR}/taxonomy.qza \
+--o-visualization ${OUTPUT_DIR}/taxonomy.qzv
+
+
+#############################################
+# STEP 11 — TAXA BARPLOT
+#############################################
+
+echo "========================================="
+echo "STEP 11: Taxa Barplot"
+echo "========================================="
+
+qiime taxa barplot \
+--i-table ${OUTPUT_DIR}/otu-table.qza \
+--i-taxonomy ${OUTPUT_DIR}/taxonomy.qza \
+--m-metadata-file ${METADATA} \
+--o-visualization ${OUTPUT_DIR}/taxa-bar-plots.qzv
+
+
+#############################################
+# STEP 12 — COLLAPSE TABLE (GENUS LEVEL)
+#############################################
+
+echo "========================================="
+echo "STEP 12: Collapse Table at Genus Level"
+echo "========================================="
+
+qiime taxa collapse \
+--i-table ${OUTPUT_DIR}/otu-table.qza \
+--i-taxonomy ${OUTPUT_DIR}/taxonomy.qza \
+--p-level 6 \
+--o-collapsed-table ${OUTPUT_DIR}/collapsed-table.qza
+
+
+#############################################
+# STEP 13 — ADD PSEUDOCOUNT
+#############################################
+
+echo "========================================="
+echo "STEP 13: Adding Pseudocount"
+echo "========================================="
+
+qiime composition add-pseudocount \
+--i-table ${OUTPUT_DIR}/collapsed-table.qza \
+--o-composition-table ${OUTPUT_DIR}/comp-collapsed-table.qza
+
+
+#############################################
+# STEP 14 — ANCOM ANALYSIS
+#############################################
+
+echo "========================================="
+echo "STEP 14: ANCOM Differential Abundance"
+echo "========================================="
+
+qiime composition ancom \
+--i-table ${OUTPUT_DIR}/comp-collapsed-table.qza \
+--m-metadata-file ${METADATA} \
+--m-metadata-column env_material \
+--o-visualization ${OUTPUT_DIR}/ancom.qzv
+
+
+#############################################
+# STEP 15 — BETA DIVERSITY
+#############################################
+
+echo "========================================="
+echo "STEP 15: Bray-Curtis Beta Diversity"
+echo "========================================="
+
+qiime diversity beta \
+--i-table ${OUTPUT_DIR}/otu-table.qza \
+--p-metric braycurtis \
+--o-distance-matrix ${OUTPUT_DIR}/bray-curtis-distance.qza
+
+
+#############################################
+# PIPELINE COMPLETED
+#############################################
+
+echo "========================================="
+echo "COMPLETE PIPELINE FINISHED SUCCESSFULLY"
+echo "========================================="
+```
+
+---
+
+#Run the Pipeline
+
+```bash
+chmod +x qiime2_pipeline.sh
+./qiime2_pipeline.sh
+```
+
+---
+
+#Outputs Generated
+
+| Step | Output |
+|------|---------|
+| Metadata | `metadata.qzv` |
+| Demux Summary | `demux-summary.qzv` |
+| OTU Table | `otu-table.qza` |
+| OTU Sequences | `otu-seqs.qza` |
+| Taxonomy | `taxonomy.qza` |
+| Taxa Barplot | `taxa-bar-plots.qzv` |
+| ANCOM | `ancom.qzv` |
+| Bray-Curtis Matrix | `bray-curtis-distance.qza` |
+
+---
+
+#Requirements
+
+- QIIME2 installed
+- SILVA reference database:
+  - `silva-138-99-seqs.qza`
+  - `silva-138-99-tax.qza`
+
+---
+
+#Notes
+
+- OTU clustering performed at **97% similarity**
+- ANCOM uses `env_material` as the metadata column
+- Beta diversity metric used: **Bray-Curtis**
+
+---
